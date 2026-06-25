@@ -491,6 +491,109 @@ canvas { display: block; width: 100%; height: 120px; }
   * { transition: none !important; animation: none !important; }
 }
 
+
+/* ===== MOBILE RESPONSIVE PATCH ===== */
+@media (max-width: 768px) {
+  body {
+    overflow-y: auto !important;
+    height: auto !important;
+  }
+
+  .app-header {
+    grid-template-columns: 1fr !important;
+    padding: 10px !important;
+    gap: 10px !important;
+  }
+
+  .transport-bar,
+  .system-actions {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+  }
+
+  .app-workspace {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 8px !important;
+    gap: 8px !important;
+    overflow-y: auto !important;
+  }
+
+  .sidebar-panel,
+  .center-stage {
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  .view-navigation-bar {
+    flex-direction: column !important;
+  }
+
+  .view-tab {
+    width: 100% !important;
+  }
+
+  .sample-pads {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  .sampler-controls,
+  .synth-parameter-dashboard {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .ctrl-group,
+  .segmented-control,
+  input[type="range"],
+  input[type="number"] {
+    width: 100% !important;
+  }
+
+  .panel-header-row {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+  }
+
+  .pad-row {
+    min-width: max-content;
+  }
+
+  .grid-scroll-wrap,
+  .piano-roll-scroll-frame {
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .keys-bed {
+    overflow-x: auto;
+  }
+
+  .maximize-window-container,
+  .maximize-viewport-body {
+    padding: 10px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .sample-pads {
+    grid-template-columns: 1fr !important;
+  }
+
+  .logo-text {
+    font-size: 1rem !important;
+  }
+
+  .transport-btn {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  .readout-block {
+    font-size: 0.9rem !important;
+  }
+}
+
 </style>
 </head>
 <body>
