@@ -1,318 +1,303 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pad/01 — Beat Machine</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neusic — The Sample-First Beat Engine</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- maximize overlay: hidden by default, activated per-panel -->
-<div class="maximize-overlay" id="maximizeOverlay" hidden>
-  <div class="maximize-inner" id="maximizeInner"></div>
-  <button class="maximize-close" id="maximizeClose" aria-label="Close maximized view">✕ Close</button>
-</div>
-
-<div class="app" id="appRoot">
-
-  <!-- ══════════════════════ TRANSPORT ══════════════════════ -->
-  <header class="transport">
-    <div class="brand">
-      <span class="brand-mark">Pad</span><span class="brand-slash">/</span><span class="brand-num">01</span>
+  <header class="app-header">
+    <div class="brand-group">
+      <h1 class="logo-text">NEUSIC</h1>
+      <span class="tagline">Sample-First Beat Engine</span>
     </div>
 
-    <button class="play-btn" id="playBtn" aria-label="Play">
-      <svg class="icon-play" viewBox="0 0 24 24" width="14" height="14"><path d="M5 3l16 9-16 9V3z" fill="currentColor"/></svg>
-      <svg class="icon-stop" viewBox="0 0 24 24" width="14" height="14" hidden><rect x="5" y="5" width="14" height="14" fill="currentColor"/></svg>
-    </button>
+    <div class="transport-bar">
+      <button class="transport-btn" id="playBtn" aria-label="Toggle Playback">
+        <svg class="icon-play" viewBox="0 0 24 24" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
+        <svg class="icon-stop" viewBox="0 0 24 24" width="16" height="16" hidden><rect x="4" y="4" width="16" height="16" fill="currentColor"/></svg>
+      </button>
 
-    <div class="transport-readout">
-      <div class="readout-block">
+      <div class="scrub-readout">
+        <div class="readout-block" id="patternReadout" title="Current Active Pattern">A<small> ×1</small></div>
+        <div class="readout-block" id="stepReadout" title="Current Playhead Step">01<small>/16</small></div>
+      </div>
+
+      <div class="input-container" title="Beats Per Minute">
         <label for="bpmInput">BPM</label>
-        <input type="number" id="bpmInput" min="40" max="240" value="120" inputmode="numeric">
+        <input type="number" id="bpmInput" value="120" min="40" max="240">
       </div>
-      <div class="readout-block step-readout">
-        <label>Step</label>
-        <span id="stepReadout">01<small>/16</small></span>
+
+      <div class="input-container" title="Shuffle Percentage Offset">
+        <label for="swingInput">SWING</label>
+        <input type="range" id="swingInput" value="0" min="0" max="100">
       </div>
-      <div class="readout-block pattern-readout">
-        <label>Pattern</label>
-        <span id="patternReadout">A<small> ×1</small></span>
-      </div>
-      <div class="readout-block">
-        <label for="swingInput">Swing</label>
-        <input type="range" id="swingInput" min="0" max="60" value="0">
-      </div>
-      <div class="readout-block">
-        <label for="masterVol">Master</label>
-        <input type="range" id="masterVol" min="0" max="100" value="80">
+
+      <div class="input-container volume-container" title="Master Gain Stage Output Level">
+        <label for="masterVol">VOL</label>
+        <input type="range" id="masterVol" value="85" min="0" max="100">
       </div>
     </div>
 
-    <div class="transport-actions">
-      <button class="ghost-btn icon-btn" id="undoBtn" title="Undo (Ctrl+Z)" aria-label="Undo">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13C5 8.5 9 6 13 6a9 9 0 1 1 0 18 9 9 0 0 1-6-2.5"/></svg>
+    <div class="system-actions">
+      <button class="icon-btn theme-toggle" id="themeToggle" title="Switch between dark and light theme" aria-label="Toggle theme">
+        <span class="theme-icon" id="themeIcon">☾</span>
       </button>
-      <button class="ghost-btn icon-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M21 13C19 8.5 15 6 11 6a9 9 0 1 0 0 18 9 9 0 0 0 6-2.5"/></svg>
-      </button>
-      <button class="ghost-btn" id="clearBtn">Clear</button>
-      <button class="ghost-btn" id="exportBtn">Export</button>
+      <button class="icon-btn" id="undoBtn" disabled title="Undo Action (Ctrl+Z)">↶</button>
+      <button class="icon-btn" id="redoBtn" disabled title="Redo Action (Ctrl+Shift+Z)">↷</button>
       <div class="save-group">
-        <button class="ghost-btn" id="saveBtn">Save</button>
+        <button class="ghost-btn" id="saveBtn" title="Save current project">Save</button>
         <select id="loadSelect" aria-label="Load saved project">
           <option value="">Load…</option>
         </select>
       </div>
+      <button class="ghost-btn accent-btn" id="exportBtn" title="Bounce Loop to Disk">Export (.wav)</button>
+      <button class="danger-btn" id="clearBtn" title="Wipe Current Active Grid States">Clear</button>
     </div>
   </header>
 
-  <!-- ══════════════════════ PATTERN CHAIN ══════════════════════ -->
-  <div class="chain-bar" id="chainBar">
-    <div class="chain-label">Song</div>
-    <div class="chain-slots" id="chainSlots"></div>
-    <button class="ghost-btn chain-add" id="chainAddBtn" title="Add step to song chain">+ Step</button>
-    <div class="chain-sep"></div>
-    <div class="pattern-library" id="patternLibrary"></div>
-    <button class="ghost-btn chain-add" id="patternNewBtn" title="Create new pattern">+ Pattern</button>
-    <div class="chain-sep"></div>
-    <div class="chain-mode-group">
-      <label class="chain-mode-label">Play</label>
-      <div class="seg-control seg-sm" id="chainModeSeg">
-        <button data-val="pattern" class="active">Pattern</button>
-        <button data-val="song">Song</button>
-      </div>
-    </div>
-  </div>
+  <main class="app-workspace">
 
-  <!-- ══════════════════════ VIEW TABS + ZOOM ══════════════════════ -->
-  <div class="tabs-row">
-    <nav class="view-tabs" role="tablist">
-      <button class="view-tab active" data-view="drums" role="tab" aria-selected="true">
-        <span class="tab-num">01</span><span class="tab-label"> Drum Grid</span>
-      </button>
-      <button class="view-tab" data-view="synth" role="tab" aria-selected="false">
-        <span class="tab-num">02</span><span class="tab-label"> Synth + Keys</span>
-      </button>
-      <button class="view-tab" data-view="sampler" role="tab" aria-selected="false">
-        <span class="tab-num">03</span><span class="tab-label"> Sampler</span>
-      </button>
-    </nav>
-
-    <div class="zoom-controls">
-      <div class="zoom-group" title="Zoom the overall interface">
-        <span class="zoom-label">UI</span>
-        <button class="zoom-btn" id="uiZoomOut" aria-label="Zoom UI out">−</button>
-        <span class="zoom-readout" id="uiZoomReadout">100%</span>
-        <button class="zoom-btn" id="uiZoomIn" aria-label="Zoom UI in">+</button>
-      </div>
-      <div class="zoom-group" title="Zoom piano roll cells">
-        <span class="zoom-label">Roll</span>
-        <button class="zoom-btn" id="rollZoomOut" aria-label="Zoom roll out">−</button>
-        <span class="zoom-readout" id="rollZoomReadout">100%</span>
-        <button class="zoom-btn" id="rollZoomIn" aria-label="Zoom roll in">+</button>
-      </div>
-      <div class="zoom-group" title="Zoom drum step grid">
-        <span class="zoom-label">Grid</span>
-        <button class="zoom-btn" id="gridZoomOut" aria-label="Zoom grid out">−</button>
-        <span class="zoom-readout" id="gridZoomReadout">100%</span>
-        <button class="zoom-btn" id="gridZoomIn" aria-label="Zoom grid in">+</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════ DRUM GRID VIEW ══════════════════════ -->
-  <div class="view" id="view-drums">
-
-    <section class="panel" data-panel="drumGrid">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="drumGrid" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Drum grid</span>
-        </button>
-        <div class="panel-header-actions">
-          <button class="ghost-btn panel-max-btn" data-maximize="drumGrid" title="Maximize">⤢</button>
+    <aside class="sidebar-panel sidebar-left">
+      <div class="panel-section">
+        <h3>Workspace Zoom</h3>
+        <div class="zoom-tool-row">
+          <div class="zoom-ctrl">
+            <span class="zoom-lbl">UI:</span>
+            <button id="uiZoomOut">−</button>
+            <span id="uiZoomReadout">100%</span>
+            <button id="uiZoomIn">+</button>
+          </div>
+          <div class="zoom-ctrl">
+            <span class="zoom-lbl">Grid:</span>
+            <button id="gridZoomOut">−</button>
+            <span id="gridZoomReadout">100%</span>
+            <button id="gridZoomIn">+</button>
+          </div>
+          <div class="zoom-ctrl">
+            <span class="zoom-lbl">Keys:</span>
+            <button id="rollZoomOut">−</button>
+            <span id="rollZoomReadout">100%</span>
+            <button id="rollZoomIn">+</button>
+          </div>
         </div>
       </div>
-      <div class="panel-body" id="drumGrid-body">
-        <div class="grid-panel" id="drumGrid"></div>
-      </div>
-    </section>
 
-    <!-- Sample Sequencer Grid -->
-    <section class="panel" data-panel="sampleGrid">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="sampleGrid" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Sample sequencer <span class="panel-hint" id="sampleGridHint">— load slices in Sampler tab</span></span>
-        </button>
-      </div>
-      <div class="panel-body" id="sampleGrid-body">
-        <div class="grid-panel" id="sampleGrid">
-          <p class="empty-hint">No slices loaded. Go to the Sampler tab, load a file and hit Auto-slice, then click "Send to Sequencer".</p>
+      <div class="panel-section">
+        <div class="section-title-bar">
+          <h3>Patterns</h3>
+          <button class="mini-add-btn" id="patternNewBtn" title="Create New Empty Pattern">+</button>
         </div>
+        <div class="pattern-scroll-list" id="patternLibrary"></div>
       </div>
-    </section>
 
-    <section class="panel panel-side" data-panel="drumMixer">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="drumMixer" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Pad mixer</span>
-        </button>
+      <div class="panel-section">
+        <div class="section-title-bar">
+          <h3>Arrangement Chain</h3>
+          <button class="mini-add-btn" id="chainAddBtn" title="Append Active Pattern to Sequence">+</button>
+        </div>
+
+        <div class="segmented-control" id="chainModeSeg" style="margin-bottom: 12px;">
+          <button class="active" data-val="pattern">Loop Active</button>
+          <button data-val="song">Play Chain</button>
+        </div>
+
+        <div class="chain-timeline" id="chainSlots"></div>
       </div>
-      <div class="panel-body" id="drumMixer-body">
-        <div id="drumMixer" class="mixer-list"></div>
-      </div>
-    </section>
+    </aside>
 
-  </div>
+    <div class="center-stage">
 
-  <!-- ══════════════════════ SYNTH / PIANO ROLL VIEW ══════════════════════ -->
-  <div class="view" id="view-synth" hidden>
+      <nav class="view-navigation-bar" role="tablist">
+        <button class="view-tab active" data-view="sampler" role="tab" aria-selected="true">01. Sampler Workspace</button>
+        <button class="view-tab" data-view="drums" role="tab" aria-selected="false">02. Percussion Matrix</button>
+        <button class="view-tab" data-view="synth" role="tab" aria-selected="false">03. Poly Melodic Synth</button>
+      </nav>
 
-    <section class="panel" data-panel="synthControls">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="synthControls" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Synth controls</span>
-        </button>
-      </div>
-      <div class="panel-body" id="synthControls-body">
-        <div class="synth-controls">
-          <div class="ctrl-group">
-            <label>Waveform</label>
-            <div class="seg-control" id="waveSeg">
-              <button data-val="sine" class="active">Sine</button>
-              <button data-val="triangle">Triangle</button>
-              <button data-val="sawtooth">Saw</button>
-              <button data-val="square">Square</button>
+      <section class="panel view-container" id="view-sampler">
+        <div class="panel-header-row">
+          <div class="panel-title-block">
+            <button class="panel-toggle" aria-expanded="true">
+              <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span>Sample Waveform Analyzer &amp; Slicer</span>
+          </div>
+          <button class="panel-max-btn" data-maximize="view-sampler" title="Maximize Sampler Frame">⤢</button>
+        </div>
+
+        <div class="panel-contents">
+          <div class="drop-zone" id="dropZone">
+            <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p>Drag &amp; Drop Drum Break / Vocal Sample or Click to Load (.wav, .mp3)</p>
+            <input type="file" id="fileInput" accept="audio/*" style="display: none;">
+          </div>
+
+          <div class="waveform-wrap" id="waveformWrap" hidden>
+            <div class="canvas-container">
+              <canvas id="waveCanvas"></canvas>
+              <div class="chop-cursor" id="chopCursor" hidden></div>
             </div>
+
+            <div class="sampler-controls">
+              <div class="segmented-control" id="chopModeSeg">
+                <button class="active" data-val="auto">Auto Split</button>
+                <button data-val="manual">Manual Tap</button>
+              </div>
+
+              <div class="ctrl-group" id="autoChopGroup">
+                <label for="chopCount">Chops</label>
+                <input type="range" id="chopCount" min="2" max="16" value="8">
+                <span id="chopCountReadout">8</span>
+              </div>
+
+              <div class="ctrl-group">
+                <label>Voice Mode</label>
+                <div class="segmented-control" id="polyModeSeg">
+                  <button class="active" data-val="mono">MPC Mono</button>
+                  <button data-val="poly">Poly</button>
+                </div>
+              </div>
+
+              <button class="ghost-btn" id="chopBtn">Recalculate Chops</button>
+              <button class="ghost-btn" id="clearChopsBtn" title="Remove all manual markers">Clear Markers</button>
+              <button class="ghost-btn" id="addToPadsBtn">→ Pads</button>
+              <button class="ghost-btn accent-btn" id="addToSeqBtn">→ Sequencer</button>
+            </div>
+            <p class="hint" id="manualChopHint" hidden>Click anywhere across the waveform to plant a cut marker. Right-click a marker to remove it.</p>
           </div>
-          <div class="ctrl-group">
-            <label for="synthAttack">Attack</label>
-            <input type="range" id="synthAttack" min="0" max="100" value="2">
+
+          <div class="sample-pads-workspace">
+            <h4>Live Performance Launch Pads <small>(Keyboard Triggers 1-8 / Q-I)</small></h4>
+            <div class="sample-pads" id="samplePads"></div>
           </div>
-          <div class="ctrl-group">
-            <label for="synthRelease">Release</label>
-            <input type="range" id="synthRelease" min="0" max="100" value="25">
-          </div>
-          <div class="ctrl-group">
-            <label for="synthCutoff">Filter cutoff</label>
-            <input type="range" id="synthCutoff" min="0" max="100" value="100">
-          </div>
-          <div class="ctrl-group">
-            <label id="octaveLabel">Octave</label>
-            <div class="oct-stepper" role="group" aria-labelledby="octaveLabel">
-              <button id="octDown" aria-label="Octave down">−</button>
-              <span id="octReadout">4</span>
-              <button id="octUp" aria-label="Octave up">+</button>
+
+          <div class="sample-sequencer-rack">
+            <div class="rack-header">
+              <h4>Sample Sequencer Matrix <span id="sampleGridHint">— unassigned</span></h4>
+            </div>
+            <div class="grid-scroll-wrap">
+              <div class="pad-grid" id="sampleGrid"></div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="panel" data-panel="pianoRoll">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="pianoRoll" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Piano roll</span>
-        </button>
-        <div class="panel-header-actions">
-          <button class="ghost-btn panel-max-btn" data-maximize="pianoRoll" title="Maximize">⤢</button>
+      <section class="panel view-container" id="view-drums" hidden>
+        <div class="panel-header-row">
+          <div class="panel-title-block">
+            <button class="panel-toggle" aria-expanded="true">
+              <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span>Drum Kit Step Sequencer Grid <small>(Right-Click track name to upload custom .wav)</small></span>
+          </div>
+          <button class="panel-max-btn" data-maximize="view-drums" title="Maximize Percussion Matrix">⤢</button>
         </div>
-      </div>
-      <div class="panel-body" id="pianoRoll-body">
-        <div class="piano-roll-wrap">
-          <div class="roll-scroll">
-            <div class="roll-grid" id="rollGrid"></div>
+
+        <div class="panel-contents">
+          <div class="grid-scroll-wrap">
+            <div class="pad-grid" id="drumGrid"></div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="panel" data-panel="keyboard">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="keyboard" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Live keyboard</span>
-        </button>
-      </div>
-      <div class="panel-body" id="keyboard-body">
-        <div class="keyboard" id="keyboard"></div>
-        <p class="hint">Click the roll to place notes, or play live below. White keys: A S D F G H J K. Black keys: W E T Y U.</p>
-      </div>
-    </section>
-
-  </div>
-
-  <!-- ══════════════════════ SAMPLER VIEW ══════════════════════ -->
-  <div class="view" id="view-sampler" hidden>
-
-    <section class="panel" data-panel="sampleLoad">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="sampleLoad" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Load &amp; chop</span>
-        </button>
-        <div class="panel-header-actions">
-          <button class="ghost-btn panel-max-btn" data-maximize="sampleLoad" title="Maximize">⤢</button>
-        </div>
-      </div>
-      <div class="panel-body" id="sampleLoad-body">
-        <div class="drop-zone" id="dropZone">
-          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Drop an audio file, or click to browse</span>
-          <input type="file" id="fileInput" accept="audio/*" hidden>
-        </div>
-
-        <div class="waveform-wrap" id="waveformWrap" hidden>
-          <!-- canvas is interactive: click to set manual chop markers -->
-          <div class="waveform-container">
-            <canvas id="waveCanvas" height="120"></canvas>
-            <div class="chop-cursor" id="chopCursor" hidden></div>
+      <section class="panel view-container" id="view-synth" hidden>
+        <div class="panel-header-row">
+          <div class="panel-title-block">
+            <button class="panel-toggle" aria-expanded="true">
+              <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span>Analog Modeling Synthesizer Configuration</span>
           </div>
-          <div class="chop-controls">
+          <button class="panel-max-btn" data-maximize="view-synth" title="Maximize Synthesizer Space">⤢</button>
+        </div>
+
+        <div class="panel-contents">
+          <div class="synth-parameter-dashboard">
             <div class="ctrl-group">
-              <label>Mode</label>
-              <div class="seg-control seg-sm" id="chopModeSeg">
-                <button data-val="auto" class="active">Auto</button>
-                <button data-val="manual">Manual</button>
+              <label>Oscillator Wave</label>
+              <div class="segmented-control" id="waveSeg">
+                <button class="active" data-val="sine">Sine</button>
+                <button data-val="square">Square</button>
+                <button data-val="sawtooth">Saw</button>
+                <button data-val="triangle">Tri</button>
               </div>
             </div>
-            <div class="ctrl-group" id="autoChopGroup">
-              <label for="chopCount">Slices</label>
-              <input type="range" id="chopCount" min="1" max="16" value="8">
-              <span id="chopCountReadout">8</span>
+            <div class="ctrl-group">
+              <label for="synthAttack">Attack</label>
+              <input type="range" id="synthAttack" min="0" max="100" value="2">
             </div>
-            <button class="ghost-btn" id="chopBtn">Auto-slice</button>
-            <button class="ghost-btn" id="clearChopsBtn" title="Remove all manual markers">Clear cuts</button>
-            <button class="ghost-btn sampler-route-btn" id="addToPadsBtn">→ Pads</button>
-            <button class="ghost-btn sampler-route-btn accent-btn" id="addToSeqBtn">→ Sequencer</button>
+            <div class="ctrl-group">
+              <label for="synthRelease">Release</label>
+              <input type="range" id="synthRelease" min="5" max="100" value="25">
+            </div>
+            <div class="ctrl-group">
+              <label for="synthCutoff">Lowpass LP Filter</label>
+              <input type="range" id="synthCutoff" min="10" max="100" value="80">
+            </div>
+            <div class="ctrl-group">
+              <label>Octave Shift</label>
+              <div class="octave-stepper">
+                <button id="octDown">−</button>
+                <span id="octReadout">C4</span>
+                <button id="octUp">+</button>
+              </div>
+            </div>
           </div>
-          <p class="hint" id="manualChopHint" hidden>Click the waveform to add cut points. Right-click a marker to remove it.</p>
+
+          <div class="piano-roll-container">
+            <div class="piano-roll-scroll-frame">
+              <div class="piano-roll-grid" id="rollGrid"></div>
+            </div>
+          </div>
+
+          <div class="hardware-keyboard-emulation">
+            <div class="keys-bed" id="keyboard"></div>
+            <p class="hint">Click the roll to place notes, or play live below. White keys: A S D F G H J K. Black keys: W E T Y U.</p>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <aside class="sidebar-panel sidebar-right">
+      <div class="panel-section">
+        <h3>Track Console &amp; Pitch Tuners</h3>
+        <div class="mixer-container" id="drumMixer"></div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Global DSP Effects Rack</h3>
+        <div class="fx-rack-group">
+          <div class="ctrl-group">
+            <label for="fxDrive">Tape Drive Saturation</label>
+            <input type="range" id="fxDrive" min="0" max="100" value="30">
+          </div>
+          <div class="ctrl-group">
+            <label for="fxDelayTime">Delay Timing</label>
+            <input type="range" id="fxDelayTime" min="10" max="100" value="25">
+          </div>
+          <div class="ctrl-group">
+            <label for="fxDelayFeedback">Delay Feedback</label>
+            <input type="range" id="fxDelayFeedback" min="0" max="95" value="35">
+          </div>
         </div>
       </div>
-    </section>
+    </aside>
 
-    <section class="panel" data-panel="samplePads">
-      <div class="panel-header-row">
-        <button class="panel-toggle" data-target="samplePads" aria-expanded="true">
-          <svg class="chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Sample pads</span>
-        </button>
-      </div>
-      <div class="panel-body" id="samplePads-body">
-        <div class="sample-pads" id="samplePads"></div>
-      </div>
-    </section>
+  </main>
 
+  <div class="maximize-overlay" id="maximizeOverlay" hidden aria-modal="true" role="dialog">
+    <div class="maximize-window-container">
+      <div class="maximize-header">
+        <h3>Focused Panel Grid View</h3>
+        <button class="close-overlay-btn" id="maximizeClose">Minimize ⤶</button>
+      </div>
+      <div class="maximize-viewport-body" id="maximizeInner"></div>
+    </div>
   </div>
 
-</div><!-- /.app -->
-
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
