@@ -351,6 +351,22 @@ canvas { display: block; width: 100%; height: 120px; }
 }
 .canvas-container.dragging-marker { cursor: ew-resize; }
 .canvas-container.marker-hover { cursor: ew-resize; }
+.canvas-container.panning { cursor: grabbing; }
+
+.wave-zoom-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wave-zoom-toolbar .sm-btn { padding: 6px 10px; font-size: .7rem; }
+.inline-hint { margin: 0; padding: 0; font-size: .7rem; }
+
+.minimap-container {
+  position: relative; height: 28px; background: var(--bg-canvas); border-radius: var(--radius-xs);
+  box-shadow: var(--well-shadow); overflow: hidden; cursor: pointer;
+}
+.minimap-container canvas { display: block; width: 100%; height: 28px; opacity: .55; }
+.minimap-window {
+  position: absolute; top: 0; height: 100%; background: var(--accent-soft);
+  border: 1px solid var(--accent); box-sizing: border-box; cursor: grab; min-width: 6px;
+}
+.minimap-window.dragging { cursor: grabbing; }
 
 .sampler-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .ctrl-group { display: flex; flex-direction: column; gap: 4px; }
@@ -803,21 +819,44 @@ canvas { display: block; width: 100%; height: 120px; }
           </div>
 
           <div class="waveform-wrap" id="waveformWrap" hidden>
+            <div class="wave-zoom-toolbar">
+              <div class="zoom-ctrl">
+                <span class="zoom-lbl">Wave:</span>
+                <button id="waveZoomOut" title="Zoom out (or scroll wheel down on waveform)">−</button>
+                <span id="waveZoomReadout">100%</span>
+                <button id="waveZoomIn" title="Zoom in (or scroll wheel up on waveform)">+</button>
+              </div>
+              <button class="ghost-btn sm-btn" id="waveZoomFitBtn" title="Reset to full sample view">Fit to Sample</button>
+              <span class="hint inline-hint">Scroll to zoom, drag waveform or minimap to pan</span>
+            </div>
+
             <div class="canvas-container">
               <canvas id="waveCanvas"></canvas>
               <div class="chop-cursor" id="chopCursor" hidden></div>
+            </div>
+
+            <div class="minimap-container" id="minimapContainer">
+              <canvas id="minimapCanvas"></canvas>
+              <div class="minimap-window" id="minimapWindow"></div>
             </div>
 
             <div class="sampler-controls">
               <div class="segmented-control" id="chopModeSeg">
                 <button class="active" data-val="auto">Auto Split</button>
                 <button data-val="manual">Manual Tap</button>
+                <button data-val="transient">Transient Detect</button>
               </div>
 
               <div class="ctrl-group" id="autoChopGroup">
                 <label for="chopCount">Chops</label>
                 <input type="range" id="chopCount" min="2" max="16" value="8">
                 <span id="chopCountReadout">8</span>
+              </div>
+
+              <div class="ctrl-group" id="transientGroup" style="display:none;">
+                <label for="transientSensitivity">Sensitivity</label>
+                <input type="range" id="transientSensitivity" min="1" max="100" value="50">
+                <span id="transientSensitivityReadout">50%</span>
               </div>
 
               <div class="ctrl-group">
@@ -833,7 +872,8 @@ canvas { display: block; width: 100%; height: 120px; }
               <button class="ghost-btn" id="addToPadsBtn">→ Pads</button>
               <button class="ghost-btn accent-btn" id="addToSeqBtn">→ Sequencer</button>
             </div>
-            <p class="hint" id="manualChopHint" hidden>Click anywhere across the waveform to plant a cut marker. Right-click a marker to remove it. Drag any marker line left/right to fine-tune its position.</p>
+            <p class="hint" id="manualChopHint" hidden>Click anywhere across the waveform to plant a cut marker. Right-click a marker to remove it. Drag any marker line left/right to fine-tune its position. Shift+drag (or middle-click drag) to pan when zoomed in.</p>
+            <p class="hint" id="transientHint" hidden>Markers are placed automatically at detected transients. Raise sensitivity to catch more (quieter) hits, lower it to catch only the strongest ones. Drag any marker to fine-tune, or switch to Manual Tap to add/remove by hand.</p>
 
             <div class="pad-detail-panel" id="padDetailPanel" hidden>
               <span class="pad-detail-title" id="padDetailTitle">Chop 01</span>
@@ -1137,6 +1177,17 @@ canvas { display: block; width: 100%; height: 120px; }
     chopCursor:       $('chopCursor'),
     samplePads:       $('samplePads'),
     sampleGridHint:   $('sampleGridHint'),
+    waveZoomIn:       $('waveZoomIn'),
+    waveZoomOut:      $('waveZoomOut'),
+    waveZoomReadout:  $('waveZoomReadout'),
+    waveZoomFitBtn:   $('waveZoomFitBtn'),
+    minimapContainer: $('minimapContainer'),
+    minimapCanvas:    $('minimapCanvas'),
+    minimapWindow:    $('minimapWindow'),
+    transientGroup:   $('transientGroup'),
+    transientSensitivity: $('transientSensitivity'),
+    transientSensitivityReadout: $('transientSensitivityReadout'),
+    transientHint:    $('transientHint'),
     padDetailPanel:   $('padDetailPanel'),
     padDetailTitle:   $('padDetailTitle'),
     padDetailClose:   $('padDetailClose'),
@@ -1207,7 +1258,10 @@ canvas { display: block; width: 100%; height: 120px; }
     activePatternIdx: 0,
     chain: [0], chainMode: 'pattern', chainStep: 0,
     chopMode: 'auto',
-    sampler: { buffer: null, fileName: '', slices: [], playMode: 'mono', editingPadIdx: null },
+    sampler: {
+      buffer: null, fileName: '', slices: [], playMode: 'mono', editingPadIdx: null,
+      viewStart: 0, viewEnd: 0, // visible time window in seconds; 0/0 means "not yet initialized"
+    },
   };
 
   const pat = () => state.patterns[state.activePatternIdx];
@@ -2100,10 +2154,14 @@ canvas { display: block; width: 100%; height: 120px; }
         state.sampler.fileName = file.name;
         state.sampler.slices = [];
         state.sampler.editingPadIdx = null;
+        state.sampler.viewStart = 0;
+        state.sampler.viewEnd = buffer.duration;
         if (els.padDetailPanel) els.padDetailPanel.hidden = true;
         Object.keys(heldLoopVoices).forEach(k => stopHeldLoop(k, audioCtx.currentTime));
         els.waveformWrap.hidden = false;
         drawWaveform();
+        drawMinimap();
+        refreshWaveZoomUI();
         els.samplePads.innerHTML = '';
       }, () => alert('Could not decode that audio file. Try WAV or MP3.'));
     };
@@ -2122,9 +2180,94 @@ canvas { display: block; width: 100%; height: 120px; }
     buildSamplePads();
   }
 
+  // ── Transient detection: simple energy-onset analysis ──
+  // 1) Compute a short-window RMS envelope across the whole buffer.
+  // 2) Take the envelope's positive-going derivative ("onset strength") — energy
+  //    that's rising fast is much more likely to be a drum/vocal hit than steady tone.
+  // 3) Peak-pick: keep local maxima above a sensitivity-controlled threshold, enforcing
+  //    a minimum spacing so a single hit's attack doesn't get split into several markers.
+  function detectTransientChops() {
+    if (!state.sampler.buffer) return;
+    const buffer = state.sampler.buffer;
+    const sr = buffer.sampleRate;
+    const data = buffer.getChannelData(0);
+    const dur = buffer.duration;
+
+    const windowSize = Math.max(64, Math.round(sr * 0.012));  // ~12ms analysis window
+    const hopSize = Math.max(32, Math.round(sr * 0.006));     // ~6ms hop (overlap for smoother envelope)
+    const numFrames = Math.max(1, Math.floor((data.length - windowSize) / hopSize));
+
+    // RMS envelope.
+    const envelope = new Float32Array(numFrames);
+    for (let f = 0; f < numFrames; f++) {
+      const start = f * hopSize;
+      let sumSq = 0;
+      for (let i = 0; i < windowSize; i++) {
+        const v = data[start + i] || 0;
+        sumSq += v * v;
+      }
+      envelope[f] = Math.sqrt(sumSq / windowSize);
+    }
+
+    // Light smoothing to reduce single-frame noise spikes before differentiating.
+    const smoothed = new Float32Array(numFrames);
+    for (let f = 0; f < numFrames; f++) {
+      const a = envelope[Math.max(0, f - 1)], b = envelope[f], c = envelope[Math.min(numFrames - 1, f + 1)];
+      smoothed[f] = (a + b + c) / 3;
+    }
+
+    // Positive-going derivative = onset strength. Negative deltas (decay) are clamped to 0.
+    const onset = new Float32Array(numFrames);
+    let maxOnset = 0;
+    for (let f = 1; f < numFrames; f++) {
+      const d = smoothed[f] - smoothed[f - 1];
+      onset[f] = d > 0 ? d : 0;
+      if (onset[f] > maxOnset) maxOnset = onset[f];
+    }
+    if (maxOnset < 1e-6) { alert('No clear transients detected — the sample may be too quiet or too uniform.'); return; }
+
+    // Sensitivity (1-100, default 50) maps to a threshold fraction of the peak onset
+    // value: higher sensitivity → lower threshold → more (and quieter) hits detected.
+    const sensitivity = els.transientSensitivity ? parseInt(els.transientSensitivity.value, 10) : 50;
+    const thresholdFrac = 0.35 - (sensitivity / 100) * 0.30; // ranges ~0.05 (high sens) to ~0.35 (low sens)
+    const threshold = maxOnset * Math.max(0.02, thresholdFrac);
+
+    // Minimum spacing between accepted transients, also sensitivity-scaled a little so
+    // high sensitivity can still pack hits closer together for fast breakbeats.
+    const minSpacingSec = 0.05 + (1 - sensitivity / 100) * 0.07; // ~50ms (high sens) to ~120ms (low sens)
+    const minSpacingFrames = Math.max(1, Math.round(minSpacingSec / (hopSize / sr)));
+
+    const picks = [];
+    let lastPick = -Infinity;
+    for (let f = 1; f < numFrames - 1; f++) {
+      if (onset[f] < threshold) continue;
+      if (onset[f] < onset[f - 1] || onset[f] < onset[f + 1]) continue; // local max only
+      if (f - lastPick < minSpacingFrames) continue;
+      picks.push(f);
+      lastPick = f;
+    }
+
+    if (!picks.length) { alert('No transients found at this sensitivity — try raising it.'); return; }
+
+    const times = [0, ...picks.map(f => (f * hopSize) / sr)]
+      .filter(t => t < dur - 0.01)
+      .sort((a, b) => a - b);
+    const uniqueTimes = [...new Set(times.map(t => +t.toFixed(5)))];
+
+    state.sampler.slices = uniqueTimes.map((t, idx) => ensureSliceDefaults({
+      start: t,
+      end: idx < uniqueTimes.length - 1 ? uniqueTimes[idx + 1] : dur,
+    }));
+    state.sampler.editingPadIdx = null;
+    if (els.padDetailPanel) els.padDetailPanel.hidden = true;
+    drawWaveform();
+    buildSamplePads();
+  }
+
   function drawWaveform() {
     const buffer = state.sampler.buffer;
     if (!buffer) return;
+    if (state.sampler.viewEnd <= state.sampler.viewStart) resetView();
     const canvas = els.waveCanvas;
     const dpr = window.devicePixelRatio || 1;
     const cssW = canvas.clientWidth || 600;
@@ -2137,27 +2280,40 @@ canvas { display: block; width: 100%; height: 120px; }
     cx.fillStyle = wellBg;
     cx.fillRect(0, 0, cssW, 120);
 
+    const sr = buffer.sampleRate;
     const data = buffer.getChannelData(0);
-    const step = Math.ceil(data.length / cssW);
+    const viewStartSample = Math.max(0, Math.floor(state.sampler.viewStart * sr));
+    const viewEndSample = Math.min(data.length, Math.ceil(state.sampler.viewEnd * sr));
+    const visibleSamples = Math.max(1, viewEndSample - viewStartSample);
+    const step = Math.max(1, Math.ceil(visibleSamples / cssW));
+
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ff6b00';
     cx.strokeStyle = 'rgba(120,160,255,0.55)';
     cx.lineWidth = 1; cx.beginPath();
     for (let i = 0; i < cssW; i++) {
+      const sampleStart = viewStartSample + i * step;
+      if (sampleStart >= viewEndSample) break;
       let mn = 1, mx = -1;
-      for (let j = 0; j < step; j++) { const v = data[i * step + j] || 0; if (v < mn) mn = v; if (v > mx) mx = v; }
+      for (let j = 0; j < step; j++) {
+        const v = data[sampleStart + j];
+        if (v === undefined) break;
+        if (v < mn) mn = v; if (v > mx) mx = v;
+      }
+      if (mn > mx) { mn = 0; mx = 0; }
       cx.moveTo(i, 60 + mn * 55); cx.lineTo(i, 60 + mx * 55);
     }
     cx.stroke();
 
     drawSliceMarkers(cx, cssW, accent, dpr);
+    syncMinimapWindow();
   }
 
   function drawSliceMarkers(cx, cssW, accent, dpr) {
     if (!state.sampler.buffer) return;
-    const dur = state.sampler.buffer.duration;
     state.sampler.slices.forEach((s, idx) => {
       if (s.start === 0 && idx === 0) return;
-      const x = (s.start / dur) * cssW;
+      if (s.start < state.sampler.viewStart || s.start > state.sampler.viewEnd) return; // off-screen at current zoom
+      const x = timeToX(s.start, cssW);
       const isActive = markerDrag && markerDrag.sliceIdx === idx;
       const isHovered = !markerDrag && hoveredMarkerIdx === idx;
       cx.strokeStyle = isActive ? '#fff' : accent;
@@ -2172,6 +2328,48 @@ canvas { display: block; width: 100%; height: 120px; }
       cx.font = `bold ${Math.round(9 * dpr) / dpr}px monospace`;
       cx.fillText(`${idx + 1}`, x + 3, 14);
     });
+  }
+
+  // ── Minimap: always shows the FULL sample, with a draggable window rectangle
+  // indicating (and controlling) what's currently visible in the zoomed main view. ──
+  function drawMinimap() {
+    const buffer = state.sampler.buffer;
+    if (!buffer || !els.minimapCanvas) return;
+    const canvas = els.minimapCanvas;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth || 600;
+    const cssH = 28;
+    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+    const cx = canvas.getContext('2d');
+    cx.setTransform(1, 0, 0, 1, 0, 0);
+    cx.scale(dpr, dpr);
+
+    const wellBg = getComputedStyle(document.documentElement).getPropertyValue('--bg-canvas').trim() || '#141518';
+    cx.fillStyle = wellBg;
+    cx.fillRect(0, 0, cssW, cssH);
+
+    const data = buffer.getChannelData(0);
+    const step = Math.ceil(data.length / cssW);
+    cx.strokeStyle = 'rgba(120,160,255,0.5)';
+    cx.lineWidth = 1; cx.beginPath();
+    for (let i = 0; i < cssW; i++) {
+      let mn = 1, mx = -1;
+      for (let j = 0; j < step; j++) { const v = data[i * step + j] || 0; if (v < mn) mn = v; if (v > mx) mx = v; }
+      cx.moveTo(i, cssH / 2 + mn * (cssH / 2 - 1)); cx.lineTo(i, cssH / 2 + mx * (cssH / 2 - 1));
+    }
+    cx.stroke();
+    syncMinimapWindow();
+  }
+
+  function syncMinimapWindow() {
+    const buffer = state.sampler.buffer;
+    if (!buffer || !els.minimapWindow || !els.minimapContainer) return;
+    const full = buffer.duration;
+    const w = els.minimapContainer.clientWidth || 1;
+    const leftPx = (state.sampler.viewStart / full) * w;
+    const widthPx = Math.max(6, (viewDuration() / full) * w);
+    els.minimapWindow.style.left = leftPx + 'px';
+    els.minimapWindow.style.width = widthPx + 'px';
   }
 
   function stopHeldLoop(padIdx, time) {
@@ -2358,9 +2556,17 @@ canvas { display: block; width: 100%; height: 120px; }
       btn.classList.add('active');
       state.chopMode = btn.dataset.val;
       const isManual = state.chopMode === 'manual';
-      els.autoChopGroup.style.display = isManual ? 'none' : '';
+      const isTransient = state.chopMode === 'transient';
+      const isAuto = state.chopMode === 'auto';
+
+      els.autoChopGroup.style.display = isAuto ? '' : 'none';
+      if (els.transientGroup) els.transientGroup.style.display = isTransient ? '' : 'none';
       els.chopBtn.style.display = isManual ? 'none' : '';
+      els.chopBtn.textContent = isTransient ? 'Detect Transients' : 'Recalculate Chops';
       els.manualChopHint.hidden = !isManual;
+      if (els.transientHint) els.transientHint.hidden = !isTransient;
+      // Manual drag-to-add only makes sense in Manual Tap mode; transient mode still
+      // allows marker dragging (handled separately) but not click-to-add.
       els.waveCanvas.parentElement.style.cursor = isManual ? 'crosshair' : 'default';
       if (els.chopCursor) els.chopCursor.hidden = true;
     });
@@ -2374,7 +2580,15 @@ canvas { display: block; width: 100%; height: 120px; }
   });
 
   els.chopCount.addEventListener('input', () => { els.chopCountReadout.textContent = els.chopCount.value; });
-  els.chopBtn.addEventListener('click', recalculateAutoChops);
+  if (els.transientSensitivity) {
+    els.transientSensitivity.addEventListener('input', () => {
+      els.transientSensitivityReadout.textContent = els.transientSensitivity.value + '%';
+    });
+  }
+  els.chopBtn.addEventListener('click', () => {
+    if (state.chopMode === 'transient') detectTransientChops();
+    else recalculateAutoChops();
+  });
   els.clearChopsBtn.addEventListener('click', () => {
     state.sampler.slices = [];
     state.sampler.editingPadIdx = null;
@@ -2386,9 +2600,82 @@ canvas { display: block; width: 100%; height: 120px; }
 
   const waveContainer = els.waveCanvas.parentElement;
   const MARKER_HIT_PX = 7; // pixel hit-radius around a marker line for grabbing it
+  const MIN_VIEW_SECONDS = 0.03; // hard floor so zoom-in can't collapse the window to nothing
+
+  // ── Waveform zoom/pan view-window ──
+  // state.sampler.viewStart/viewEnd define the visible time range (seconds).
+  // All canvas <-> time coordinate math goes through these two helpers so every
+  // interaction (click, drag, hover) stays correct at any zoom level.
+  function viewDuration() { return state.sampler.viewEnd - state.sampler.viewStart; }
+
+  function timeToX(t, rectWidth) {
+    return ((t - state.sampler.viewStart) / viewDuration()) * rectWidth;
+  }
+  function xToTime(x, rectWidth) {
+    return state.sampler.viewStart + (x / rectWidth) * viewDuration();
+  }
+
+  function resetView() {
+    if (!state.sampler.buffer) return;
+    state.sampler.viewStart = 0;
+    state.sampler.viewEnd = state.sampler.buffer.duration;
+  }
+
+  function clampView() {
+    const buf = state.sampler.buffer;
+    if (!buf) return;
+    const full = buf.duration;
+    let { viewStart, viewEnd } = state.sampler;
+    let dur = Math.max(MIN_VIEW_SECONDS, Math.min(full, viewEnd - viewStart));
+    if (viewStart < 0) { viewStart = 0; }
+    if (viewStart + dur > full) { viewStart = full - dur; }
+    state.sampler.viewStart = Math.max(0, viewStart);
+    state.sampler.viewEnd = state.sampler.viewStart + dur;
+  }
+
+  function setZoom(newDur, anchorTime) {
+    const buf = state.sampler.buffer;
+    if (!buf) return;
+    const full = buf.duration;
+    newDur = Math.max(MIN_VIEW_SECONDS, Math.min(full, newDur));
+    // Keep the anchor point (e.g. cursor position, or current center) at the same
+    // fractional position within the new window so zooming feels like it's
+    // zooming "into" where you're looking rather than always re-centering.
+    const oldDur = viewDuration();
+    const anchorFrac = oldDur > 0 ? (anchorTime - state.sampler.viewStart) / oldDur : 0.5;
+    let newStart = anchorTime - anchorFrac * newDur;
+    state.sampler.viewStart = newStart;
+    state.sampler.viewEnd = newStart + newDur;
+    clampView();
+    refreshWaveZoomUI();
+    drawWaveform();
+    drawMinimap();
+  }
+
+  function zoomByFactor(factor, anchorTime) {
+    const center = anchorTime !== undefined ? anchorTime
+      : state.sampler.viewStart + viewDuration() / 2;
+    setZoom(viewDuration() * factor, center);
+  }
+
+  function panBy(deltaSeconds) {
+    const buf = state.sampler.buffer;
+    if (!buf) return;
+    state.sampler.viewStart += deltaSeconds;
+    state.sampler.viewEnd += deltaSeconds;
+    clampView();
+    drawWaveform();
+    drawMinimap();
+  }
+
+  function refreshWaveZoomUI() {
+    if (!els.waveZoomReadout || !state.sampler.buffer) return;
+    const pct = Math.round((state.sampler.buffer.duration / viewDuration()) * 100);
+    els.waveZoomReadout.textContent = pct + '%';
+  }
 
   function markerPixelX(slice, rectWidth) {
-    return (slice.start / state.sampler.buffer.duration) * rectWidth;
+    return timeToX(slice.start, rectWidth);
   }
 
   // Find the index of a slice (other than slice 0, which is fixed at t=0) whose
@@ -2400,6 +2687,7 @@ canvas { display: block; width: 100%; height: 120px; }
     let best = null, bestDist = Infinity;
     state.sampler.slices.forEach((s, idx) => {
       if (idx === 0) return; // first marker is locked to the sample start
+      if (s.start < state.sampler.viewStart || s.start > state.sampler.viewEnd) return; // off-screen
       const mx = markerPixelX(s, rect.width);
       const d = Math.abs(mx - x);
       if (d <= MARKER_HIT_PX && d < bestDist) { bestDist = d; best = idx; }
@@ -2407,9 +2695,21 @@ canvas { display: block; width: 100%; height: 120px; }
     return best;
   }
 
+  let wavePan = null; // { startClientX, startViewStart, startViewEnd } while shift/middle-drag panning
+
   waveContainer.addEventListener('mousemove', e => {
     if (!state.sampler.buffer) { if (els.chopCursor) els.chopCursor.hidden = true; return; }
 
+    if (wavePan) {
+      const rect = waveContainer.getBoundingClientRect();
+      const dxFrac = (e.clientX - wavePan.startClientX) / rect.width;
+      const dur = wavePan.startViewEnd - wavePan.startViewStart;
+      state.sampler.viewStart = wavePan.startViewStart - dxFrac * dur;
+      state.sampler.viewEnd = wavePan.startViewEnd - dxFrac * dur;
+      clampView();
+      drawWaveform();
+      return;
+    }
     if (markerDrag) return; // document-level mousemove listener drives active drags
 
     const nearIdx = findMarkerNearClientX(e.clientX);
@@ -2430,9 +2730,18 @@ canvas { display: block; width: 100%; height: 120px; }
     if (els.chopCursor) els.chopCursor.hidden = true;
   });
 
-  // ── Manual marker dragging (works in both Auto Split and Manual Tap modes) ──
+  // ── Manual marker dragging (works in Auto Split, Manual Tap, and Transient modes) ──
   waveContainer.addEventListener('mousedown', e => {
-    if (e.button !== 0 || !state.sampler.buffer) return;
+    if (!state.sampler.buffer) return;
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      // Middle-click drag, or Shift+left-drag: pan the view instead of editing markers.
+      e.preventDefault();
+      wavePan = { startClientX: e.clientX, startViewStart: state.sampler.viewStart, startViewEnd: state.sampler.viewEnd };
+      waveContainer.classList.add('panning');
+      if (els.chopCursor) els.chopCursor.hidden = true;
+      return;
+    }
+    if (e.button !== 0) return;
     const nearIdx = findMarkerNearClientX(e.clientX);
     if (nearIdx === null) return; // not grabbing a marker — let click handler deal with it
     e.preventDefault();
@@ -2444,15 +2753,15 @@ canvas { display: block; width: 100%; height: 120px; }
   function dragMarkerTo(clientX) {
     if (!markerDrag || !state.sampler.buffer) return;
     const rect = waveContainer.getBoundingClientRect();
-    const dur = state.sampler.buffer.duration;
-    const xFrac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    let timePos = xFrac * dur;
+    const x = Math.min(rect.width, Math.max(0, clientX - rect.left));
+    let timePos = xToTime(x, rect.width);
 
     const slices = state.sampler.slices;
     const idx = markerDrag.sliceIdx;
+    const fullDur = state.sampler.buffer.duration;
     const prevStart = idx > 0 ? slices[idx - 1].start : 0;
-    const nextStart = idx < slices.length - 1 ? slices[idx + 1].start : dur;
-    const margin = dur * 0.005;
+    const nextStart = idx < slices.length - 1 ? slices[idx + 1].start : fullDur;
+    const margin = fullDur * 0.002;
     timePos = Math.min(nextStart - margin, Math.max(prevStart + margin, timePos));
 
     slices[idx].start = timePos;
@@ -2469,20 +2778,36 @@ canvas { display: block; width: 100%; height: 120px; }
     if (markerDrag) dragMarkerTo(e.clientX);
   });
   document.addEventListener('mouseup', () => {
-    if (!markerDrag) return;
-    markerDrag = null;
-    waveContainer.classList.remove('dragging-marker');
-    buildSamplePads(); // refresh pad labels/positions, slice contents already updated live
+    if (markerDrag) {
+      markerDrag = null;
+      waveContainer.classList.remove('dragging-marker');
+      buildSamplePads(); // refresh pad labels/positions, slice contents already updated live
+    }
+    if (wavePan) {
+      wavePan = null;
+      waveContainer.classList.remove('panning');
+      drawMinimap();
+    }
   });
 
+  // Scroll wheel zooms the waveform centered on the cursor position.
+  waveContainer.addEventListener('wheel', e => {
+    if (!state.sampler.buffer) return;
+    e.preventDefault();
+    const rect = waveContainer.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const anchorTime = xToTime(x, rect.width);
+    zoomByFactor(e.deltaY < 0 ? 0.8 : 1.25, anchorTime);
+  }, { passive: false });
+
   waveContainer.addEventListener('click', e => {
-    if (markerDrag) return; // a drag's mouseup shouldn't also register as a click-to-add
+    if (markerDrag || wavePan) return; // a drag's mouseup shouldn't also register as a click-to-add
     if (state.chopMode !== 'manual' || !state.sampler.buffer) return;
     if (findMarkerNearClientX(e.clientX) !== null) return; // clicked a marker, not empty space
 
     const rect = waveContainer.getBoundingClientRect();
-    const xFrac = (e.clientX - rect.left) / rect.width;
-    const timePos = xFrac * state.sampler.buffer.duration;
+    const x = e.clientX - rect.left;
+    const timePos = xToTime(x, rect.width);
     const dur = state.sampler.buffer.duration;
 
     if (timePos < .01 || timePos > dur - .01) return;
@@ -2503,14 +2828,16 @@ canvas { display: block; width: 100%; height: 120px; }
     if (state.chopMode !== 'manual' || !state.sampler.buffer) return;
     e.preventDefault();
     const rect = waveContainer.getBoundingClientRect();
-    const xFrac = (e.clientX - rect.left) / rect.width;
-    const timePos = xFrac * state.sampler.buffer.duration;
-    const dur = state.sampler.buffer.duration;
+    const x = e.clientX - rect.left;
+    const timePos = xToTime(x, rect.width);
 
-    const threshold = dur * .03;
+    // Hit-test in pixel space (consistent at any zoom level) rather than a
+    // fraction of the full sample duration, which would be way too sloppy when zoomed in.
+    const threshold = viewDuration() * (MARKER_HIT_PX * 1.5 / rect.width);
     const nearest = state.sampler.slices.find(s => s.start > 0 && Math.abs(s.start - timePos) < threshold);
     if (!nearest) return;
 
+    const dur = state.sampler.buffer.duration;
     const cutPoints = state.sampler.slices.map(s => s.start).filter(t => t !== nearest.start);
     if (!cutPoints.length || cutPoints[0] !== 0) cutPoints.unshift(0);
     cutPoints.sort((a, b) => a - b);
@@ -2520,6 +2847,53 @@ canvas { display: block; width: 100%; height: 120px; }
     }));
     drawWaveform();
     buildSamplePads();
+  });
+
+  // ── Zoom toolbar buttons ──
+  if (els.waveZoomIn) els.waveZoomIn.addEventListener('click', () => zoomByFactor(0.7));
+  if (els.waveZoomOut) els.waveZoomOut.addEventListener('click', () => zoomByFactor(1 / 0.7));
+  if (els.waveZoomFitBtn) els.waveZoomFitBtn.addEventListener('click', () => {
+    resetView();
+    refreshWaveZoomUI();
+    drawWaveform();
+    drawMinimap();
+  });
+
+  // ── Minimap interaction: click-to-jump, drag the window rectangle to pan ──
+  let minimapDrag = null;
+  if (els.minimapWindow) {
+    els.minimapWindow.addEventListener('mousedown', e => {
+      if (!state.sampler.buffer) return;
+      e.preventDefault(); e.stopPropagation();
+      minimapDrag = { startClientX: e.clientX, startViewStart: state.sampler.viewStart, startViewEnd: state.sampler.viewEnd };
+      els.minimapWindow.classList.add('dragging');
+    });
+  }
+  if (els.minimapContainer) {
+    els.minimapContainer.addEventListener('mousedown', e => {
+      if (!state.sampler.buffer || e.target === els.minimapWindow) return;
+      const rect = els.minimapContainer.getBoundingClientRect();
+      const frac = (e.clientX - rect.left) / rect.width;
+      const full = state.sampler.buffer.duration;
+      const centerTime = frac * full;
+      setZoom(viewDuration(), centerTime);
+    });
+  }
+  document.addEventListener('mousemove', e => {
+    if (!minimapDrag || !state.sampler.buffer) return;
+    const rect = els.minimapContainer.getBoundingClientRect();
+    const full = state.sampler.buffer.duration;
+    const dxFrac = (e.clientX - minimapDrag.startClientX) / rect.width;
+    const dur = minimapDrag.startViewEnd - minimapDrag.startViewStart;
+    state.sampler.viewStart = minimapDrag.startViewStart + dxFrac * full;
+    state.sampler.viewEnd = state.sampler.viewStart + dur;
+    clampView();
+    drawWaveform();
+  });
+  document.addEventListener('mouseup', () => {
+    if (!minimapDrag) return;
+    minimapDrag = null;
+    if (els.minimapWindow) els.minimapWindow.classList.remove('dragging');
   });
 
   const PAD_KEY_MAP = {
