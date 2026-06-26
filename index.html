@@ -349,6 +349,8 @@ canvas { display: block; width: 100%; height: 120px; }
   position: absolute; top: 0; width: 1px; height: 100%;
   background: var(--green); pointer-events: none; opacity: .8;
 }
+.canvas-container.dragging-marker { cursor: ew-resize; }
+.canvas-container.marker-hover { cursor: ew-resize; }
 
 .sampler-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .ctrl-group { display: flex; flex-direction: column; gap: 4px; }
@@ -374,6 +376,42 @@ canvas { display: block; width: 100%; height: 120px; }
 .sample-pad .pad-key { font-size: .55rem; color: var(--text-faint); position: absolute; bottom: 4px; right: 6px; }
 .sample-pad.playing { box-shadow: var(--inner-shadow); color: var(--blue); }
 .sample-pad.key-active { box-shadow: var(--inner-shadow); background: var(--accent-soft); color: var(--blue); }
+.sample-pad.mod-reverse { color: var(--amber); }
+.sample-pad.mod-loop::after {
+  content: ''; position: absolute; top: 4px; right: 6px; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--green);
+}
+
+.pad-mod-row {
+  display: flex; align-items: center; gap: 3px; position: absolute; top: 3px; left: 5px;
+}
+.pad-mod-btn {
+  width: 15px; height: 13px; font-size: .5rem; padding: 0; line-height: 1;
+  box-shadow: none; background: var(--bg-well); color: var(--text-faint);
+  border-radius: 3px; display: flex; align-items: center; justify-content: center;
+}
+.pad-mod-btn.active { background: var(--accent); color: var(--bg-well); }
+.pad-mod-btn[data-mod="loop"].active { background: var(--green); }
+
+.pad-detail-panel {
+  background: var(--bg-well); box-shadow: var(--inner-shadow); border-radius: var(--radius-sm);
+  padding: 12px; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+  font-family: var(--mono);
+}
+.pad-detail-panel .ctrl-group label { white-space: nowrap; }
+.pad-detail-panel select.ctrl-select {
+  background: var(--bg-panel); color: var(--text-main); border: none; box-shadow: var(--inner-shadow);
+  border-radius: var(--radius-xs); padding: 6px 8px; font-family: var(--mono); font-size: .75rem;
+}
+.pad-detail-title {
+  font-size: .7rem; font-weight: 700; color: var(--accent); text-transform: uppercase;
+  letter-spacing: .04em; width: 100%;
+}
+.pad-detail-close {
+  margin-left: auto; background: transparent; box-shadow: none; color: var(--text-faint);
+  font-size: .9rem; padding: 2px 6px;
+}
+.range-readout { font-family: var(--mono); font-size: .75rem; color: var(--text-dim); min-width: 38px; text-align: right; }
 
 /* ── Matrix Sequencer ── */
 .grid-scroll-wrap {
@@ -795,11 +833,55 @@ canvas { display: block; width: 100%; height: 120px; }
               <button class="ghost-btn" id="addToPadsBtn">→ Pads</button>
               <button class="ghost-btn accent-btn" id="addToSeqBtn">→ Sequencer</button>
             </div>
-            <p class="hint" id="manualChopHint" hidden>Click anywhere across the waveform to plant a cut marker. Right-click a marker to remove it.</p>
+            <p class="hint" id="manualChopHint" hidden>Click anywhere across the waveform to plant a cut marker. Right-click a marker to remove it. Drag any marker line left/right to fine-tune its position.</p>
+
+            <div class="pad-detail-panel" id="padDetailPanel" hidden>
+              <span class="pad-detail-title" id="padDetailTitle">Chop 01</span>
+              <button class="pad-detail-close" id="padDetailClose" title="Close">✕</button>
+
+              <div class="ctrl-group">
+                <label>Playback</label>
+                <div class="segmented-control" id="padReverseSeg">
+                  <button class="active" data-val="forward">Forward</button>
+                  <button data-val="reverse">Reverse</button>
+                </div>
+              </div>
+
+              <div class="ctrl-group">
+                <label>Hold Behavior</label>
+                <div class="segmented-control" id="padLoopSeg">
+                  <button class="active" data-val="oneshot">One-shot</button>
+                  <button data-val="loop">Loop While Held</button>
+                </div>
+              </div>
+
+              <div class="ctrl-group">
+                <label for="padPitchSlider">Pitch (semitones)</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="range" id="padPitchSlider" min="-24" max="24" value="0" step="1">
+                  <span class="range-readout" id="padPitchReadout">0 st</span>
+                </div>
+              </div>
+
+              <div class="ctrl-group">
+                <label for="padStretchSelect">Sync Length To BPM</label>
+                <select class="ctrl-select" id="padStretchSelect">
+                  <option value="">Off (original length)</option>
+                  <option value="0.25">1/4 beat</option>
+                  <option value="0.5">1/2 beat</option>
+                  <option value="1">1 beat</option>
+                  <option value="2">2 beats</option>
+                  <option value="4">1 bar (4 beats)</option>
+                  <option value="8">2 bars</option>
+                </select>
+              </div>
+
+              <button class="ghost-btn" id="padPreviewBtn">▶ Preview</button>
+            </div>
           </div>
 
           <div class="sample-pads-workspace">
-            <h4>Live Performance Launch Pads <small>(Keyboard Triggers 1-8 / Q-I)</small></h4>
+            <h4>Live Performance Launch Pads <small>(Keyboard Triggers 1-8 / Q-I — right-click a pad to edit reverse/loop/pitch/stretch, or tap the R/L badges)</small></h4>
             <div class="sample-pads" id="samplePads"></div>
           </div>
 
@@ -949,6 +1031,19 @@ canvas { display: block; width: 100%; height: 120px; }
   let rackDistortion = null;
 
   let activeSampleNodes = [];
+
+  // ── Sampler workflow upgrade state ──
+  let markerDrag = null;        // { sliceIdx, prevSliceIdx } while a marker is being dragged
+  let hoveredMarkerIdx = null;  // slice index whose start-marker the mouse is currently near
+  const heldLoopVoices = {};    // padIdx -> { src, gain } currently looping while held
+
+  function ensureSliceDefaults(slice) {
+    if (slice.reverse === undefined) slice.reverse = false;
+    if (slice.loop === undefined) slice.loop = false;
+    if (slice.pitch === undefined) slice.pitch = 0;       // semitones
+    if (slice.stretchBeats === undefined) slice.stretchBeats = null; // null = off
+    return slice;
+  }
   let activeDrumNodes = {};
 
   function ensureAudio() {
@@ -1042,6 +1137,15 @@ canvas { display: block; width: 100%; height: 120px; }
     chopCursor:       $('chopCursor'),
     samplePads:       $('samplePads'),
     sampleGridHint:   $('sampleGridHint'),
+    padDetailPanel:   $('padDetailPanel'),
+    padDetailTitle:   $('padDetailTitle'),
+    padDetailClose:   $('padDetailClose'),
+    padReverseSeg:    $('padReverseSeg'),
+    padLoopSeg:       $('padLoopSeg'),
+    padPitchSlider:   $('padPitchSlider'),
+    padPitchReadout:  $('padPitchReadout'),
+    padStretchSelect: $('padStretchSelect'),
+    padPreviewBtn:    $('padPreviewBtn'),
     uiZoomIn:         $('uiZoomIn'),
     uiZoomOut:        $('uiZoomOut'),
     uiZoomReadout:    $('uiZoomReadout'),
@@ -1103,7 +1207,7 @@ canvas { display: block; width: 100%; height: 120px; }
     activePatternIdx: 0,
     chain: [0], chainMode: 'pattern', chainStep: 0,
     chopMode: 'auto',
-    sampler: { buffer: null, fileName: '', slices: [], playMode: 'mono' },
+    sampler: { buffer: null, fileName: '', slices: [], playMode: 'mono', editingPadIdx: null },
   };
 
   const pat = () => state.patterns[state.activePatternIdx];
@@ -1289,28 +1393,172 @@ canvas { display: block; width: 100%; height: 120px; }
     }
   }
 
-  function playSliceAudio(sliceIdx, time, volume) {
-    if (!state.sampler.buffer) return;
-    const slice = state.sampler.slices[sliceIdx];
-    if (!slice) return;
-    const audioCtx = ensureAudio();
+  // ════════════════════════════════════════════════════════════════
+  // Sample-manipulation DSP engine — granular overlap-add (OLA) time
+  // stretch + pitch shift. No external libraries; operates on plain
+  // Float32 channel data extracted from the loaded AudioBuffer.
+  // ════════════════════════════════════════════════════════════════
 
-    if (state.sampler.playMode === 'mono') {
+  // Resample a Float32Array channel by `rate` (rate > 1 = higher pitch & shorter,
+  // via simple linear interpolation). Used as the resample stage of pitch-shifting.
+  function resampleLinear(data, rate) {
+    const outLen = Math.max(1, Math.floor(data.length / rate));
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const srcPos = i * rate;
+      const i0 = Math.floor(srcPos);
+      const frac = srcPos - i0;
+      const a = data[i0] || 0;
+      const b = data[i0 + 1] !== undefined ? data[i0 + 1] : a;
+      out[i] = a + (b - a) * frac;
+    }
+    return out;
+  }
+
+  // Time-stretch a Float32Array channel to `stretchFactor` length (>1 = longer/slower)
+  // while preserving pitch, using windowed overlap-add grains. Lightweight and good
+  // enough for chopped drum/vocal one-shots — not studio-grade WSOLA, but solid for this.
+  function timeStretchOLA(data, stretchFactor, sampleRate) {
+    if (Math.abs(stretchFactor - 1) < 0.001) return data.slice();
+    const grainMs = 40;
+    const grainSize = Math.max(256, Math.floor(sampleRate * grainMs / 1000));
+    const hopIn = Math.floor(grainSize / 2);
+    const hopOut = Math.floor(hopIn * stretchFactor);
+    const outLen = Math.ceil(data.length * stretchFactor) + grainSize;
+    const out = new Float32Array(outLen);
+    const win = new Float32Array(grainSize);
+    for (let i = 0; i < grainSize; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (grainSize - 1)); // Hann
+
+    let inPos = 0, outPos = 0;
+    while (inPos < data.length) {
+      for (let i = 0; i < grainSize; i++) {
+        const s = data[inPos + i];
+        if (s === undefined) break;
+        out[outPos + i] += s * win[i];
+      }
+      inPos += hopIn;
+      outPos += hopOut;
+    }
+    // Normalize for the overlap gain buildup from the Hann windows.
+    const norm = hopOut > 0 ? (hopIn / hopOut) * 1.0 : 1;
+    const scaled = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) scaled[i] = out[i] * Math.min(1.6, Math.max(0.6, norm));
+    return scaled;
+  }
+
+  // Build a processed AudioBuffer for a slice: applies BPM-sync time-stretch and/or
+  // semitone pitch-shift (independently of each other) and caches the result on the
+  // slice object so repeat triggers don't redo the DSP work.
+  function getProcessedSliceBuffer(slice) {
+    const audioCtx = ensureAudio();
+    const buffer = state.sampler.buffer;
+    const cacheKey = `${slice.start.toFixed(5)}_${slice.end.toFixed(5)}_${slice.pitch}_${slice.stretchBeats}_${state.bpm}`;
+    if (slice._cacheKey === cacheKey && slice._processedBuffer) return slice._processedBuffer;
+
+    const sr = buffer.sampleRate;
+    const startSample = Math.floor(slice.start * sr);
+    const endSample = Math.floor(slice.end * sr);
+    const sliceLen = Math.max(1, endSample - startSample);
+    const nCh = buffer.numberOfChannels;
+
+    // Pull out the raw region for each channel.
+    const rawChannels = [];
+    for (let c = 0; c < nCh; c++) {
+      rawChannels.push(buffer.getChannelData(c).slice(startSample, startSample + sliceLen));
+    }
+
+    // 1) Pitch shift: resample (changes both pitch & duration), then time-stretch
+    //    back to original duration so pitch changes independently of length.
+    const pitchRatio = Math.pow(2, (slice.pitch || 0) / 12);
+    let working = rawChannels.map(ch => {
+      if (Math.abs(pitchRatio - 1) < 0.001) return ch;
+      const resampled = resampleLinear(ch, pitchRatio);
+      // compensate length back to ~original so the stretch stage below has a clean baseline
+      const compensate = ch.length / Math.max(1, resampled.length);
+      return timeStretchOLA(resampled, compensate, sr);
+    });
+
+    // 2) BPM-sync time stretch: target length = stretchBeats * (60/bpm), independent of pitch.
+    if (slice.stretchBeats) {
+      const targetDur = slice.stretchBeats * (60 / state.bpm);
+      const currentDur = working[0].length / sr;
+      const stretchFactor = targetDur / Math.max(0.001, currentDur);
+      working = working.map(ch => timeStretchOLA(ch, stretchFactor, sr));
+    }
+
+    const outLen = Math.max(1, working[0].length);
+    const outBuffer = audioCtx.createBuffer(nCh, outLen, sr);
+    for (let c = 0; c < nCh; c++) {
+      const chData = outBuffer.getChannelData(c);
+      chData.set(working[c].subarray(0, outLen));
+    }
+
+    slice._cacheKey = cacheKey;
+    slice._processedBuffer = outBuffer;
+    return outBuffer;
+  }
+
+  function playSliceAudio(sliceIdx, time, volume, opts) {
+    if (!state.sampler.buffer) return null;
+    const slice = state.sampler.slices[sliceIdx];
+    if (!slice) return null;
+    ensureSliceDefaults(slice);
+    const audioCtx = ensureAudio();
+    const forceLoop = opts && opts.forceLoop;
+    const willLoop = forceLoop !== undefined ? forceLoop : slice.loop;
+
+    if (state.sampler.playMode === 'mono' && !willLoop) {
       activeSampleNodes.forEach(node => { try { node.stop(time); } catch (e) {} });
       activeSampleNodes = [];
     }
 
+    const needsProcessing = slice.pitch || slice.stretchBeats || slice.reverse;
     const src = audioCtx.createBufferSource();
-    src.buffer = state.sampler.buffer;
     const g = audioCtx.createGain();
     g.gain.value = volume ?? .85;
-
     src.connect(g);
     g.connect(rackDistortion);
     g.connect(rackDelay);
 
-    src.start(time, slice.start, Math.max(0.01, slice.end - slice.start));
+    if (!needsProcessing) {
+      src.buffer = state.sampler.buffer;
+      if (willLoop) {
+        src.loop = true;
+        src.loopStart = slice.start;
+        src.loopEnd = slice.end;
+        src.start(time, slice.start);
+      } else {
+        src.start(time, slice.start, Math.max(0.01, slice.end - slice.start));
+      }
+    } else {
+      let buf = getProcessedSliceBuffer(slice);
+      if (slice.reverse) {
+        const revKey = buf;
+        if (slice._reverseSource !== revKey || !slice._reversedBuffer) {
+          const reversed = audioCtx.createBuffer(buf.numberOfChannels, buf.length, buf.sampleRate);
+          for (let c = 0; c < buf.numberOfChannels; c++) {
+            const src2 = buf.getChannelData(c);
+            const dst = reversed.getChannelData(c);
+            for (let i = 0; i < src2.length; i++) dst[i] = src2[src2.length - 1 - i];
+          }
+          slice._reversedBuffer = reversed;
+          slice._reverseSource = revKey;
+        }
+        buf = slice._reversedBuffer;
+      }
+      src.buffer = buf;
+      if (willLoop) {
+        src.loop = true;
+        src.loopStart = 0;
+        src.loopEnd = buf.duration;
+        src.start(time);
+      } else {
+        src.start(time);
+      }
+    }
+
     activeSampleNodes.push(src);
+    return { src, gain: g };
   }
 
   function midiToFreq(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
@@ -1851,6 +2099,9 @@ canvas { display: block; width: 100%; height: 120px; }
         state.sampler.buffer = buffer;
         state.sampler.fileName = file.name;
         state.sampler.slices = [];
+        state.sampler.editingPadIdx = null;
+        if (els.padDetailPanel) els.padDetailPanel.hidden = true;
+        Object.keys(heldLoopVoices).forEach(k => stopHeldLoop(k, audioCtx.currentTime));
         els.waveformWrap.hidden = false;
         drawWaveform();
         els.samplePads.innerHTML = '';
@@ -1863,7 +2114,10 @@ canvas { display: block; width: 100%; height: 120px; }
     if (!state.sampler.buffer) return;
     const n = parseInt(els.chopCount.value, 10);
     const dur = state.sampler.buffer.duration;
-    state.sampler.slices = Array.from({ length: n }, (_, i) => ({ start: dur / n * i, end: dur / n * (i + 1) }));
+    state.sampler.slices = Array.from({ length: n }, (_, i) =>
+      ensureSliceDefaults({ start: dur / n * i, end: dur / n * (i + 1) }));
+    state.sampler.editingPadIdx = null;
+    if (els.padDetailPanel) els.padDetailPanel.hidden = true;
     drawWaveform();
     buildSamplePads();
   }
@@ -1901,16 +2155,60 @@ canvas { display: block; width: 100%; height: 120px; }
   function drawSliceMarkers(cx, cssW, accent, dpr) {
     if (!state.sampler.buffer) return;
     const dur = state.sampler.buffer.duration;
-    cx.strokeStyle = accent;
-    cx.lineWidth = 1.5;
     state.sampler.slices.forEach((s, idx) => {
       if (s.start === 0 && idx === 0) return;
       const x = (s.start / dur) * cssW;
+      const isActive = markerDrag && markerDrag.sliceIdx === idx;
+      const isHovered = !markerDrag && hoveredMarkerIdx === idx;
+      cx.strokeStyle = isActive ? '#fff' : accent;
+      cx.lineWidth = isActive || isHovered ? 2.5 : 1.5;
       cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, 120); cx.stroke();
-      cx.fillStyle = accent;
+      if (isHovered && !isActive) {
+        cx.fillStyle = accent; cx.globalAlpha = 0.18;
+        cx.fillRect(x - 4, 0, 8, 120);
+        cx.globalAlpha = 1;
+      }
+      cx.fillStyle = isActive ? '#fff' : accent;
       cx.font = `bold ${Math.round(9 * dpr) / dpr}px monospace`;
       cx.fillText(`${idx + 1}`, x + 3, 14);
     });
+  }
+
+  function stopHeldLoop(padIdx, time) {
+    const voice = heldLoopVoices[padIdx];
+    if (!voice) return;
+    try { voice.gain.gain.setTargetAtTime(0, time, 0.015); voice.src.stop(time + 0.05); } catch (e) {}
+    delete heldLoopVoices[padIdx];
+  }
+
+  function triggerPad(padIdx, padEl) {
+    const slice = state.sampler.slices[padIdx];
+    if (!slice) return;
+    ensureSliceDefaults(slice);
+    const now = ensureAudio().currentTime;
+
+    if (slice.loop) {
+      // Loop continuously for as long as the pad is held down.
+      stopHeldLoop(padIdx, now);
+      const voice = playSliceAudio(padIdx, now, .9, { forceLoop: true });
+      if (voice) heldLoopVoices[padIdx] = voice;
+      if (padEl) padEl.classList.add('playing');
+    } else {
+      playSliceAudio(padIdx, now, .9, { forceLoop: false });
+      if (padEl) {
+        padEl.classList.add('playing');
+        setTimeout(() => padEl.classList.remove('playing'), 140);
+      }
+    }
+  }
+
+  function releasePad(padIdx, padEl) {
+    const slice = state.sampler.slices[padIdx];
+    if (slice && slice.loop) {
+      stopHeldLoop(padIdx, ensureAudio().currentTime);
+      if (padEl) padEl.classList.remove('playing');
+    }
+    // One-shot pads clear their own 'playing' flash via setTimeout in triggerPad.
   }
 
   function buildSamplePads() {
@@ -1918,17 +2216,139 @@ canvas { display: block; width: 100%; height: 120px; }
     const mapTriggers = ['1', '2', '3', '4', '5', '6', '7', '8', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I'];
     state.sampler.slices.forEach((slice, i) => {
       if (i >= 16) return;
+      ensureSliceDefaults(slice);
       const pad = document.createElement('button');
       pad.className = 'sample-pad';
       pad.dataset.padIndex = i;
-      pad.innerHTML = `<span>CHOP ${String(i + 1).padStart(2, '0')}</span><span class="pad-key">${mapTriggers[i]}</span>`;
-      const trigger = () => {
-        playSliceAudio(i, ensureAudio().currentTime, .9);
-        pad.classList.add('playing');
-        setTimeout(() => pad.classList.remove('playing'), 140);
-      };
-      pad.addEventListener('mousedown', trigger);
+      updatePadModClasses(pad, slice);
+      pad.innerHTML = `
+        <div class="pad-mod-row">
+          <span class="pad-mod-btn" data-mod="reverse" title="Toggle reverse playback">R</span>
+          <span class="pad-mod-btn" data-mod="loop" title="Toggle loop while held">L</span>
+        </div>
+        <span>CHOP ${String(i + 1).padStart(2, '0')}</span><span class="pad-key">${mapTriggers[i]}</span>`;
+
+      pad.addEventListener('mousedown', e => {
+        if (e.button !== 0) return; // ignore right/middle click — context menu opens the detail panel
+        if (e.target.closest('.pad-mod-btn')) return; // handled separately below
+        triggerPad(i, pad);
+      });
+      ['mouseup', 'mouseleave'].forEach(evt => pad.addEventListener(evt, () => releasePad(i, pad)));
+
+      pad.addEventListener('contextmenu', e => { e.preventDefault(); openPadDetailPanel(i); });
+
+      pad.querySelectorAll('.pad-mod-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const mod = btn.dataset.mod;
+          if (mod === 'reverse') slice.reverse = !slice.reverse;
+          if (mod === 'loop') slice.loop = !slice.loop;
+          updatePadModClasses(pad, slice);
+          if (state.sampler.editingPadIdx === i) syncPadDetailPanelFromSlice(slice);
+        });
+      });
+
       els.samplePads.appendChild(pad);
+    });
+  }
+
+  function updatePadModClasses(pad, slice) {
+    pad.classList.toggle('mod-reverse', !!slice.reverse);
+    pad.classList.toggle('mod-loop', !!slice.loop);
+    const rBtn = pad.querySelector('[data-mod="reverse"]');
+    const lBtn = pad.querySelector('[data-mod="loop"]');
+    if (rBtn) rBtn.classList.toggle('active', !!slice.reverse);
+    if (lBtn) lBtn.classList.toggle('active', !!slice.loop);
+  }
+
+  // ── Per-pad detail panel: reverse / loop / pitch-shift / BPM-sync stretch ──
+  function openPadDetailPanel(padIdx) {
+    const slice = state.sampler.slices[padIdx];
+    if (!slice || !els.padDetailPanel) return;
+    ensureSliceDefaults(slice);
+    state.sampler.editingPadIdx = padIdx;
+    els.padDetailTitle.textContent = `Chop ${String(padIdx + 1).padStart(2, '0')}`;
+    els.padDetailPanel.hidden = false;
+    syncPadDetailPanelFromSlice(slice);
+  }
+
+  function syncPadDetailPanelFromSlice(slice) {
+    els.padReverseSeg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === (slice.reverse ? 'reverse' : 'forward')));
+    els.padLoopSeg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === (slice.loop ? 'loop' : 'oneshot')));
+    els.padPitchSlider.value = slice.pitch || 0;
+    els.padPitchReadout.textContent = `${slice.pitch > 0 ? '+' : ''}${slice.pitch || 0} st`;
+    els.padStretchSelect.value = slice.stretchBeats ? String(slice.stretchBeats) : '';
+  }
+
+  function currentEditingSlice() {
+    const idx = state.sampler.editingPadIdx;
+    return idx !== null ? state.sampler.slices[idx] : null;
+  }
+
+  if (els.padDetailClose) {
+    els.padDetailClose.addEventListener('click', () => {
+      els.padDetailPanel.hidden = true;
+      state.sampler.editingPadIdx = null;
+    });
+  }
+
+  if (els.padReverseSeg) {
+    els.padReverseSeg.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const slice = currentEditingSlice();
+        if (!slice) return;
+        slice.reverse = btn.dataset.val === 'reverse';
+        els.padReverseSeg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const padEl = els.samplePads.querySelector(`[data-pad-index="${state.sampler.editingPadIdx}"]`);
+        if (padEl) updatePadModClasses(padEl, slice);
+      });
+    });
+  }
+
+  if (els.padLoopSeg) {
+    els.padLoopSeg.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const slice = currentEditingSlice();
+        if (!slice) return;
+        slice.loop = btn.dataset.val === 'loop';
+        els.padLoopSeg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const padEl = els.samplePads.querySelector(`[data-pad-index="${state.sampler.editingPadIdx}"]`);
+        if (padEl) updatePadModClasses(padEl, slice);
+      });
+    });
+  }
+
+  if (els.padPitchSlider) {
+    els.padPitchSlider.addEventListener('input', () => {
+      const slice = currentEditingSlice();
+      if (!slice) return;
+      slice.pitch = parseInt(els.padPitchSlider.value, 10);
+      slice._cacheKey = null; // invalidate processed-buffer cache
+      els.padPitchReadout.textContent = `${slice.pitch > 0 ? '+' : ''}${slice.pitch} st`;
+    });
+  }
+
+  if (els.padStretchSelect) {
+    els.padStretchSelect.addEventListener('change', () => {
+      const slice = currentEditingSlice();
+      if (!slice) return;
+      const v = els.padStretchSelect.value;
+      slice.stretchBeats = v ? parseFloat(v) : null;
+      slice._cacheKey = null; // invalidate processed-buffer cache
+    });
+  }
+
+  if (els.padPreviewBtn) {
+    els.padPreviewBtn.addEventListener('click', () => {
+      const idx = state.sampler.editingPadIdx;
+      if (idx === null) return;
+      const padEl = els.samplePads.querySelector(`[data-pad-index="${idx}"]`);
+      triggerPad(idx, padEl);
+      const slice = state.sampler.slices[idx];
+      if (!slice.loop) return;
+      setTimeout(() => releasePad(idx, padEl), 1200); // auto-release a held loop preview
     });
   }
 
@@ -1957,26 +2377,109 @@ canvas { display: block; width: 100%; height: 120px; }
   els.chopBtn.addEventListener('click', recalculateAutoChops);
   els.clearChopsBtn.addEventListener('click', () => {
     state.sampler.slices = [];
+    state.sampler.editingPadIdx = null;
+    if (els.padDetailPanel) els.padDetailPanel.hidden = true;
+    Object.keys(heldLoopVoices).forEach(k => stopHeldLoop(k, ensureAudio().currentTime));
     if (state.sampler.buffer) drawWaveform();
     els.samplePads.innerHTML = '';
   });
 
   const waveContainer = els.waveCanvas.parentElement;
+  const MARKER_HIT_PX = 7; // pixel hit-radius around a marker line for grabbing it
+
+  function markerPixelX(slice, rectWidth) {
+    return (slice.start / state.sampler.buffer.duration) * rectWidth;
+  }
+
+  // Find the index of a slice (other than slice 0, which is fixed at t=0) whose
+  // start marker sits within MARKER_HIT_PX of clientX.
+  function findMarkerNearClientX(clientX) {
+    if (!state.sampler.buffer) return null;
+    const rect = waveContainer.getBoundingClientRect();
+    const x = clientX - rect.left;
+    let best = null, bestDist = Infinity;
+    state.sampler.slices.forEach((s, idx) => {
+      if (idx === 0) return; // first marker is locked to the sample start
+      const mx = markerPixelX(s, rect.width);
+      const d = Math.abs(mx - x);
+      if (d <= MARKER_HIT_PX && d < bestDist) { bestDist = d; best = idx; }
+    });
+    return best;
+  }
 
   waveContainer.addEventListener('mousemove', e => {
-    if (state.chopMode !== 'manual' || !state.sampler.buffer) {
+    if (!state.sampler.buffer) { if (els.chopCursor) els.chopCursor.hidden = true; return; }
+
+    if (markerDrag) return; // document-level mousemove listener drives active drags
+
+    const nearIdx = findMarkerNearClientX(e.clientX);
+    hoveredMarkerIdx = nearIdx;
+    waveContainer.classList.toggle('marker-hover', nearIdx !== null);
+
+    if (state.chopMode !== 'manual') {
       if (els.chopCursor) els.chopCursor.hidden = true;
       return;
     }
+    if (nearIdx !== null) { if (els.chopCursor) els.chopCursor.hidden = true; return; }
     const rect = waveContainer.getBoundingClientRect();
     const x = e.clientX - rect.left;
     els.chopCursor.style.left = x + 'px';
     els.chopCursor.hidden = false;
   });
-  waveContainer.addEventListener('mouseleave', () => { if (els.chopCursor) els.chopCursor.hidden = true; });
+  waveContainer.addEventListener('mouseleave', () => {
+    if (els.chopCursor) els.chopCursor.hidden = true;
+  });
+
+  // ── Manual marker dragging (works in both Auto Split and Manual Tap modes) ──
+  waveContainer.addEventListener('mousedown', e => {
+    if (e.button !== 0 || !state.sampler.buffer) return;
+    const nearIdx = findMarkerNearClientX(e.clientX);
+    if (nearIdx === null) return; // not grabbing a marker — let click handler deal with it
+    e.preventDefault();
+    markerDrag = { sliceIdx: nearIdx };
+    waveContainer.classList.add('dragging-marker');
+    if (els.chopCursor) els.chopCursor.hidden = true;
+  });
+
+  function dragMarkerTo(clientX) {
+    if (!markerDrag || !state.sampler.buffer) return;
+    const rect = waveContainer.getBoundingClientRect();
+    const dur = state.sampler.buffer.duration;
+    const xFrac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    let timePos = xFrac * dur;
+
+    const slices = state.sampler.slices;
+    const idx = markerDrag.sliceIdx;
+    const prevStart = idx > 0 ? slices[idx - 1].start : 0;
+    const nextStart = idx < slices.length - 1 ? slices[idx + 1].start : dur;
+    const margin = dur * 0.005;
+    timePos = Math.min(nextStart - margin, Math.max(prevStart + margin, timePos));
+
+    slices[idx].start = timePos;
+    if (idx > 0) slices[idx - 1].end = timePos;
+    // Dragging changes the underlying audio region, so any cached stretched/
+    // reversed/pitched buffers for these two slices are now stale.
+    slices[idx]._cacheKey = null;
+    if (idx > 0) slices[idx - 1]._cacheKey = null;
+
+    drawWaveform();
+  }
+
+  document.addEventListener('mousemove', e => {
+    if (markerDrag) dragMarkerTo(e.clientX);
+  });
+  document.addEventListener('mouseup', () => {
+    if (!markerDrag) return;
+    markerDrag = null;
+    waveContainer.classList.remove('dragging-marker');
+    buildSamplePads(); // refresh pad labels/positions, slice contents already updated live
+  });
 
   waveContainer.addEventListener('click', e => {
+    if (markerDrag) return; // a drag's mouseup shouldn't also register as a click-to-add
     if (state.chopMode !== 'manual' || !state.sampler.buffer) return;
+    if (findMarkerNearClientX(e.clientX) !== null) return; // clicked a marker, not empty space
+
     const rect = waveContainer.getBoundingClientRect();
     const xFrac = (e.clientX - rect.left) / rect.width;
     const timePos = xFrac * state.sampler.buffer.duration;
@@ -1988,7 +2491,7 @@ canvas { display: block; width: 100%; height: 120px; }
 
     const cutPoints = [0, ...state.sampler.slices.map(s => s.start).filter(t => t > 0), timePos].sort((a, b) => a - b);
     const uniqueStarts = [...new Set(cutPoints)];
-    state.sampler.slices = uniqueStarts.map((t, idx) => ({
+    state.sampler.slices = uniqueStarts.map((t, idx) => ensureSliceDefaults({
       start: t,
       end: idx < uniqueStarts.length - 1 ? uniqueStarts[idx + 1] : dur,
     }));
@@ -2011,7 +2514,7 @@ canvas { display: block; width: 100%; height: 120px; }
     const cutPoints = state.sampler.slices.map(s => s.start).filter(t => t !== nearest.start);
     if (!cutPoints.length || cutPoints[0] !== 0) cutPoints.unshift(0);
     cutPoints.sort((a, b) => a - b);
-    state.sampler.slices = cutPoints.map((t, idx) => ({
+    state.sampler.slices = cutPoints.map((t, idx) => ensureSliceDefaults({
       start: t,
       end: idx < cutPoints.length - 1 ? cutPoints[idx + 1] : dur,
     }));
@@ -2023,19 +2526,28 @@ canvas { display: block; width: 100%; height: 120px; }
     '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '8': 7,
     'q': 8, 'w': 9, 'e': 10, 'r': 11, 't': 12, 'y': 13, 'u': 14, 'i': 15,
   };
+  const heldPadKeys = new Set(); // keys currently held, to ignore OS key-repeat retriggers
   document.addEventListener('keydown', e => {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
     const key = e.key.toLowerCase();
     if (PAD_KEY_MAP.hasOwnProperty(key)) {
       const padIdx = PAD_KEY_MAP[key];
       if (padIdx < state.sampler.slices.length) {
-        playSliceAudio(padIdx, ensureAudio().currentTime, .9);
         const padEl = els.samplePads.querySelector(`[data-pad-index="${padIdx}"]`);
-        if (padEl) {
-          padEl.classList.add('playing');
-          setTimeout(() => padEl.classList.remove('playing'), 140);
+        if (!heldPadKeys.has(key)) {
+          heldPadKeys.add(key);
+          triggerPad(padIdx, padEl);
         }
       }
+    }
+  });
+  document.addEventListener('keyup', e => {
+    const key = e.key.toLowerCase();
+    if (PAD_KEY_MAP.hasOwnProperty(key) && heldPadKeys.has(key)) {
+      heldPadKeys.delete(key);
+      const padIdx = PAD_KEY_MAP[key];
+      const padEl = els.samplePads.querySelector(`[data-pad-index="${padIdx}"]`);
+      releasePad(padIdx, padEl);
     }
   });
 
@@ -2229,6 +2741,15 @@ canvas { display: block; width: 100%; height: 120px; }
   applyZoom();
   initPanels();
   updatePlayheadUI(-1);
+
+  // Debug/test hook — namespaced, side-effect free, safe to leave in place.
+  window.__neusicDebug = {
+    getSlices: () => state.sampler.slices,
+    getState: () => state,
+    triggerPad,
+    releasePad,
+    openPadDetailPanel,
+  };
 
 })();
 
